@@ -1,13 +1,132 @@
 #!/usr/bin/env python3
 
+from operator import is_
 from vaspwfc import vaspwfc
+import backend
 from vasp_constant import *
 import numpy as np
 import subprocess
-from aflow_sym_python import Symmetry
 import json
 import bz2
 import math as m
+
+def get_schoenflies(W):
+    """
+    Translates a 3x3 rotation matrix symmetry element into its Schoenflies notation.
+    
+    :param W: 3x3 rotation matrix
+    :return: label,, axis and angle
+    """
+    if W.shape != (3,3):
+        raise ValueError("Input must be a 3x3 rotation matrix")
+    det = np.linalg.det(W)
+    I = np.eye(3,3)
+    if abs(det - 1) < 1e-5:
+        kind = "C"
+        R = W
+    elif abs(det + 1) < 1e-5:
+        kind = "S"
+        R = -W
+    else: # Force
+        kind = "C" if det > 0 else "S"
+        R = W if det > 0 else -W
+    
+    if np.allclose(R, I, rtol=1e-5):
+        label = "1" if kind == "C" else "S2"
+        return label, None, 0.0
+
+    tr = np.trace(R)
+    cos_theta = np.clip((tr - 1) / 2, -1.0, 1.0)
+    theta = float(np.degrees(np.arccos(cos_theta)))
+
+    allowed = np.array([1, 2, 3, 4, 6], dtype=float)
+    if theta < 1e-8:
+        n = 1.0
+    else:
+        n_est = 360.0 / theta
+        n = float(allowed[np.argmin(np.abs(allowed - n_est))])
+    
+    label = f"{kind}{int(n)}"
+
+    vals, vec = np.linalg.eig(R)
+    idx = int(np.argmax(np.isclose(np.real_if_close(vals), 1.0, atol=1e-6)))
+    axis = np.real_if_close(vec[:, idx]).astype(float)
+    norm = np.linalg.norm(axis)
+    axis = axis / norm if norm > 1e-8 else None
+
+    return label, axis, theta
+
+
+def get_cell_from_poscar(pos_file):
+    """
+    Reads a POSCAR or CONTCAR file and returns a cell in the format required by spglib
+
+    Input:
+        pos_file: string that is the path to a crystal structure file like POSCAR or CONTCAR
+
+    Returns:
+        cell: tuple of lattice, positions and atomic numbers
+    """
+
+    f = open(pos_file,"r")
+    lines = f.readlines()
+    f.close()
+
+    scale = float(lines[1])
+
+    vectors = []
+    temp_row = []
+
+    for i in range(3):
+        for j in range(3):
+            temp_row.append(float(lines[j+2].split()[i])*scale)
+        vectors.append(temp_row)
+        temp_row = []
+
+    try:
+        elements = lines[5].split()
+        amounts = np.array(lines[6].split()).astype(int)
+        natoms = int(sum(amounts))
+        coord_type = lines[7].strip().lower()
+        start_line = 8
+    except:
+        elements = lines[5].split()
+        amounts = np.array(lines[6].split()).astype(int)
+        natoms = int(sum(amounts))
+        coord_type = lines[7].strip().lower()
+        start_line = 9
+
+    positions = []
+    numbers = []
+
+    A = np.array(vectors, dtype=float)
+
+    for i in range(natoms):
+        line = lines[start_line+i].split()
+        pos = np.array([float(line[0]), float(line[1]), float(line[2])], dtype=float)
+        if coord_type and coord_type[0] == 'c':
+            frac = np.linalg.solve(A, pos)
+            positions.append(frac.tolist())
+        else:
+            positions.append(pos.tolist())
+
+    for i, el in enumerate(elements):
+        for j in range(amounts[i]):
+            numbers.append(symbol_to_atomic_number(el))
+
+    cell = (np.array(vectors, dtype=float), np.array(positions, dtype=float), np.array(numbers, dtype=int))
+    distances = []
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            d_frac = np.array(positions[i]) - np.array(positions[j])
+            d_cart = A @ d_frac
+            distances.append(np.linalg.norm(d_cart))
+
+    if distances:
+        return cell, min(distances)
+    else:
+        return cell, 0.0
+
 
 def get_pointgroup(pos_file, settings):
     """
@@ -23,10 +142,25 @@ def get_pointgroup(pos_file, settings):
 
 
     #pg = subprocess.check_output("aflow --aflowsym="+str(settings['aflow_tolerance'])+" < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, text=True)
-    pg = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
-    " < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
-    check=True, text=True, capture_output=True).stdout
-    subprocess.run("rm aflow.*.out.xz" ,shell=True)
+    if backend.is_spglib():
+        cell = get_cell_from_poscar(pos_file)
+        pg = spglib.get_spacegroup(cell, symprec=float(settings['aflow_tolerance']), symbol_type=1)
+    else:
+        pg = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
+        " < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
+        check=True, text=True, capture_output=True).stdout
+        subprocess.run("rm aflow.*.out.xz" ,shell=True)
+
+    """
+    Swap subprocess stuff to:
+    cell = / build it lol /:
+    Lattice: TypeAlias = Sequence[Sequence[float]]
+    Positions: TypeAlias = Sequence[Sequence[float]]
+    Numbers: TypeAlias = Sequence[int]
+    SpgCell: TypeAlias = tuple[Lattice, Positions, Numbers]
+    spglib.get_spacegroup(cell, symprec=float(settings['aflow_tolerance']), symbol_type=1)
+    https://spglib.readthedocs.io/en/stable/api/python-api.html#spglib.spglib.get_symmetry
+    """
 
     pg = group_name_conv(pg)
 
@@ -91,46 +225,71 @@ def get_symmetry_operators(sym, pos_file, settings):
         Angle rotated
     """
 
+    if backend.is_aflow():
+        pg = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
+        " --print=json < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
+        check=True, text=True, capture_output=True).stdout
+        #pg_error = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
+        #" --print=json < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
+        #text=True).stderr
+
+        #print("Point group: ", pg)
+        subprocess.Popen("unxz aflow.pgroup_xtal.json.xz" ,shell=True).wait()
+        PGname = group_name_conv(pg)
+
+        with open('aflow.pgroup_xtal.json') as json_data:
+            out = json.load(json_data)
+            json_data.close()
     
-    pg = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
-    " --print=json < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
-    check=True, text=True, capture_output=True).stdout
-    #pg_error = subprocess.run("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+ \
-    #" --print=json < "+pos_file+" | awk '/Schoenflies/ {print $NF}' | tail -1", shell=True, \
-    #text=True).stderr
+        subprocess.Popen("rm aflow.*.json.xz" ,shell=True).wait()
+        subprocess.Popen("rm aflow.*.json" ,shell=True).wait()
+        #out_json = subprocess.check_output("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+" --print=json --screen_only < "+pos_file, shell=True)
+        #out = json.loads(out_json)['pgroup_xtal']
 
-    #print("Point group: ", pg)
-    subprocess.Popen("unxz aflow.pgroup_xtal.json.xz" ,shell=True).wait()
-    PGname = group_name_conv(pg)
+        l = []
+        for i in range(len(out)):
+            l.append((out[i]['Schoenflies'],i))
+        l.sort(key=lambda tup: tup[0])
 
-    with open('aflow.pgroup_xtal.json') as json_data:
-        out = json.load(json_data)
-        json_data.close()
+        ran = []
+        for sym, i in l:
+            ran.append(i)
+
+        symbols1 = []
+        matrices1 = []
+        angle1 = []
+        axis1 = []
+
+        for i in ran:
+            symbols1.append(out[i]['Schoenflies'])
+            matrices1.append(out[i]['Uf'])
+            angle1.append(out[i]['angle'])
+            axis1.append(out[i]['axis'])
+    else:
+        cell, min_dist = get_cell_from_poscar(pos_file)
+        tolerance = None
+        if settings["aflow_tolerance"] == "tight":
+            tolerance = min_dist / 100 # AFLOW standard
+        elif settings["aflow_tolerance"] == "loose":
+            tolerance = min_dist / 10 # AFLOW standard
+        else:
+            tolerance = float(settings["aflow_tolerance"])
+        spglib = backend.get_spglib()
+        pg = spglib.get_spacegroup(cell, symprec=tolerance, symbol_type=1)
+        PGname = pg.split("^")[0]  # Remove any superscript indicating setting
+        sym_data = spglib.get_symmetry_dataset(cell, symprec=tolerance)
+
+        symbols1 = []
+        matrices1 = []
+        angle1 = []
+        axis1 = []
+        for r in sym_data.rotations:
+            label, ax, ang = get_schoenflies(r)
+            symbols1.append(label)
+            matrices1.append(r.tolist())
+            angle1.append(ang)
+            axis1.append(ax.tolist() if ax is not None else None)
     
-    subprocess.Popen("rm aflow.*.json.xz" ,shell=True).wait()
-    subprocess.Popen("rm aflow.*.json" ,shell=True).wait()
-    #out_json = subprocess.check_output("aflow --pgroup_xtal="+str(settings['aflow_tolerance'])+" --print=json --screen_only < "+pos_file, shell=True)
-    #out = json.loads(out_json)['pgroup_xtal']
-    
-    l = []
-    for i in range(len(out)):
-        l.append((out[i]['Schoenflies'],i))
-    l.sort(key=lambda tup: tup[0])
-
-    ran = []
-    for sym, i in l:
-        ran.append(i)
-
-    symbols1 = []
-    matrices1 = []
-    angle1 = []
-    axis1 = []
-
-    for i in ran:
-        symbols1.append(out[i]['Schoenflies'])
-        matrices1.append(out[i]['Uf'])
-        angle1.append(out[i]['angle'])
-        axis1.append(out[i]['axis'])
 
     ch_table, pos_vec_rep = get_character_table(PGname,settings)
     class_symbols = ch_table[0][1:]
@@ -818,6 +977,7 @@ def calc_ipr(wf_file, spin_channel, HOB, grid_mult=1, extent = 15):
         ks = [spin_channel,1,b]
         realwf = wav.wfc_r(*ks, ngrid=grid)
         wf_abs = np.abs(realwf)
+
         temp = np.sum(wf_abs**4)
         iprs.append(temp)
 
@@ -940,6 +1100,85 @@ def load_settings(file):
     except Exception as e:
         data['char_table_dir'] = "/path/to/character_tables"
     return data
+
+
+def rotation_matrix_to_axis_angle(R):
+    theta = np.arccos((np.trace(R) - 1) / 2)
+    if np.isclose(theta, 0):
+        return np.array([0, 0, 0]), 0.0
+    if np.isclose(theta, np.pi):
+        R_plus_I = R + np.eye(3)
+        axis = np.sqrt(np.diagonal(R_plus_I) / 2.0)
+        axis = axis / np.linalg.norm(axis)
+        return axis, theta
+
+    v = (1 / 2 * np.sin(theta)) * np.array([R[2, 1] - R[1, 2],
+                                            R[0, 2] - R[2, 0],
+                                            R[1, 0] - R[0, 1]])
+    return v, theta
+
+
+def symbol_to_atomic_number(symbol):
+    """
+    Translates atomic symbols to atomic numbers in the periodic table.
+    
+    Input:
+        symbol: string with atomic symbol (e.g., 'H', 'He', 'Li')
+    
+    Returns:
+        atomic number (integer)
+    """
+    
+    periodic_table = {
+        'H': 1, 'He': 2, 'Li': 3, 'Be': 4, 'B': 5, 'C': 6, 'N': 7, 'O': 8, 'F': 9, 'Ne': 10,
+        'Na': 11, 'Mg': 12, 'Al': 13, 'Si': 14, 'P': 15, 'S': 16, 'Cl': 17, 'Ar': 18,
+        'K': 19, 'Ca': 20, 'Sc': 21, 'Ti': 22, 'V': 23, 'Cr': 24, 'Mn': 25, 'Fe': 26, 'Co': 27, 'Ni': 28,
+        'Cu': 29, 'Zn': 30, 'Ga': 31, 'Ge': 32, 'As': 33, 'Se': 34, 'Br': 35, 'Kr': 36,
+        'Rb': 37, 'Sr': 38, 'Y': 39, 'Zr': 40, 'Nb': 41, 'Mo': 42, 'Tc': 43, 'Ru': 44, 'Rh': 45, 'Pd': 46,
+        'Ag': 47, 'Cd': 48, 'In': 49, 'Sn': 50, 'Sb': 51, 'Te': 52, 'I': 53, 'Xe': 54,
+        'Cs': 55, 'Ba': 56, 'La': 57, 'Ce': 58, 'Pr': 59, 'Nd': 60, 'Pm': 61, 'Sm': 62, 'Eu': 63, 'Gd': 64,
+        'Tb': 65, 'Dy': 66, 'Ho': 67, 'Er': 68, 'Tm': 69, 'Yb': 70, 'Lu': 71, 'Hf': 72, 'Ta': 73, 'W': 74,
+        'Re': 75, 'Os': 76, 'Ir': 77, 'Pt': 78, 'Au': 79, 'Hg': 80, 'Tl': 81, 'Pb': 82, 'Bi': 83, 'Po': 84,
+        'At': 85, 'Rn': 86, 'Fr': 87, 'Ra': 88, 'Ac': 89, 'Th': 90, 'Pa': 91, 'U': 92, 'Np': 93, 'Pu': 94,
+        'Am': 95, 'Cm': 96, 'Bk': 97, 'Cf': 98, 'Es': 99, 'Fm': 100, 'Md': 101, 'No': 102, 'Lr': 103,
+        'Rf': 104, 'Db': 105, 'Sg': 106, 'Bh': 107, 'Hs': 108, 'Mt': 109, 'Ds': 110, 'Rg': 111, 'Cn': 112,
+        'Nh': 113, 'Fl': 114, 'Mc': 115, 'Lv': 116, 'Ts': 117, 'Og': 118
+    }
+    
+    return periodic_table.get(symbol, None)
+
+def atomic_number_to_symbol(atomic_number):
+    """
+    Translates atomic numbers to atomic symbols.
+    
+    Input:
+        atomic_number: integer atomic number
+    
+    Returns:
+        atomic symbol (string)
+    """
+    
+    symbols = [
+        '', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+        'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
+        'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+        'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr', 'Rb', 'Sr', 'Y', 'Zr',
+        'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd', 'In', 'Sn',
+        'Sb', 'Te', 'I', 'Xe', 'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd',
+        'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb',
+        'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+        'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn', 'Fr', 'Ra', 'Ac', 'Th',
+        'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf', 'Es', 'Fm',
+        'Md', 'No', 'Lr', 'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds',
+        'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og'
+    ]
+    
+    if 1 <= atomic_number <= len(symbols) - 1:
+        return symbols[atomic_number]
+    else:
+        return None
+
+
 
 if __name__ == "__main__":
     0

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from subprocess import DEVNULL
 from vaspwfc import vaspwfc
 import numpy as np
 import math as m
@@ -474,7 +475,7 @@ def get_allowed_transitions(char_table, position_vecs, char_list, multiplicity, 
             #if i < j:
             if i != j and 0 < occ_by_degen[i] and occ_by_degen[j] < len(bands_by_degen[j]):
                 for pos_vec in position_vecs:
-                    pos_v = np.asfarray(pos_vec[0][1:],float)
+                    pos_v = np.asarray(pos_vec[0][1:],float)
 
                     tdm = ch_final * (pos_v * ch_init)
 
@@ -595,14 +596,22 @@ def main(s1bands, s2bands, pos_file = "CONTCAR", wf_file = "WAVECAR", eig_file =
 
     """
 
-
+    from backend import is_aflow, get_Symmetry, get_spglib, backend_name
+    print(f"Using {backend_name()} for symmetry analysis.")
     settings = load_settings(settings_file)
-
-    sym = Symmetry()
+    
+    
+    sym = None
+    if is_aflow():
+        Symmetry = get_Symmetry()
+        sym = Symmetry()
+    else:
+        spglib = get_spglib()
+        globals()["spglib"] = spglib
+    
     PGname, Sym_ops = get_symmetry_operators(sym, pos_file, settings)
     print("Point group: ",PGname)
     print(Sym_ops)
-
 
     # Initial overlap and analysis for spin up channel
     no_irr_s1 = []
