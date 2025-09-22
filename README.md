@@ -9,7 +9,9 @@ The code only works for defects simulated in VASP.
 
 * numpy
 * matplotlib
-* AFLOW-SYM, follow the instructions at http://www.aflowlib.org/install-aflow/, add AFLOW to your PATH and PYTHONPATH
+* One of:
+    * AFLOW-SYM, follow the instructions at http://www.aflowlib.org/install-aflow/, add AFLOW to your PATH and PYTHONPATH
+    * spglib
 * VaspBandUnfolding, follow the instructions at https://github.com/QijingZheng/VaspBandUnfolding
 * Character table files, from http://www.gernot-katzers-spice-pages.com/character_tables, see instructions below
 
@@ -67,6 +69,20 @@ The character of a class is taken to be the average of the SOEVs of that class.
 These characters are then projected on an IR 'Gamma', and if this projection is within the "IR_tolerance" of 1, then the orbital is said to transform as IR 'Gamma'.
 This is done for all IRs in the relevant point group.
 CSM is calculated based on this projection to give a numerical measure of how well orbitals conforms to different IRs.
+
+### Backend selection (AFLOW-SYM or spglib)
+ADAQ-SYM supports both AFLOW-SYM and spglib. By default it auto-detects the backend:
+- If AFLOW-SYM binary is available, it is preferred.
+- Otherwise it falls back to spglib.
+
+You can force a backend via an environment variable:
+```bash
+export ADAQ_SYM_BACKEND=aflow
+```
+or
+```bash
+export ADAQ_SYM_BACKEND=spglib
+```
 
 ### Outputs
 The centers are written to files: ```Centers_*_Sx.npy``` and ```Centers_*_Sx.txt```.
