@@ -14,7 +14,7 @@ def _detect():
             import aflow_sym_python
             return "aflow"
         except ImportError:
-            return "aflow" # Python bindingar are not used, but aflow binary is available
+            return "aflow" # Python bindings are not used, but aflow binary is available
     
     try:
         import spglib
