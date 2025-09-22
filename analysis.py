@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from subprocess import DEVNULL
 from vaspwfc import vaspwfc
 import numpy as np
 import math as m
