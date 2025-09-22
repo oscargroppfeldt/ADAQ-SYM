@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from operator import is_
 from vaspwfc import vaspwfc
 import backend
 from vasp_constant import *
@@ -33,7 +32,7 @@ def get_schoenflies(W):
     
     if np.allclose(R, I, rtol=1e-5):
         label = "1" if kind == "C" else "S2"
-        return label, None, 0.0
+        return label, np.array([0.0, 0.0, 0.0]), 0.0
 
     tr = np.trace(R)
     cos_theta = np.clip((tr - 1) / 2, -1.0, 1.0)
