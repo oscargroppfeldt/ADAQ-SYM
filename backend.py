@@ -1,6 +1,5 @@
 import os
 from functools import lru_cache
-from tkinter import N
 from shutil import which
 
 @lru_cache(maxsize=None)

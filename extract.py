@@ -14,7 +14,7 @@ def get_schoenflies(W):
     Translates a 3x3 rotation matrix symmetry element into its Schoenflies notation.
     
     :param W: 3x3 rotation matrix
-    :return: label,, axis and angle
+    :return: label, axis, and angle
     """
     if W.shape != (3,3):
         raise ValueError("Input must be a 3x3 rotation matrix")

@@ -5,7 +5,6 @@ import numpy as np
 import scipy.integrate as sci
 import math as m
 from extract import *
-from aflow_sym_python import Symmetry
 from pprint import pprint
 import os
 import json
