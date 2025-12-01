@@ -343,15 +343,22 @@ def write_overlaps_to_text_fancy(PGname, folder_path_out, name, settings):
         0
     """
 
-    ov1 = os.path.join(folder_path_out,"Overlaps_"+name+"_S1.json")
-    ov2 = os.path.join(folder_path_out,"Overlaps_"+name+"_S2.json")
-    f1 = open(ov1,"rb")
-    f2 = open(ov2,"rb")
-    ov_array1 = json.load(f1)
-    ov_array2 = json.load(f2)
-    f1.close()
-    f2.close()
-
+    try:
+        ov1 = os.path.join(folder_path_out,"Overlaps_"+name+"_S1.json")
+        f1 = open(ov1,"rb")
+        ov_array1 = json.load(f1)
+        f1.close()
+    except:
+        ov_array1 = {"orbitals":[]}
+    
+    try:
+        ov2 = os.path.join(folder_path_out,"Overlaps_"+name+"_S2.json")
+        f2 = open(ov2,"rb")
+        ov_array2 = json.load(f2)
+        f2.close()
+    except:
+        ov_array2 = {"orbitals":[]}
+        
     rounding = 3
     space = 10+rounding*2
 

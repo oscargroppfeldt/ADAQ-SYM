@@ -173,9 +173,9 @@ def plot_eigen(orbital_info, spin, vb):
         # Manually adjust vertical position of irrep text
         y += 0.0
         if i == 0:
-            y += 0.0
+            y += -0.12
         if i == 1:
-            y += -0.06
+            y += -0.04
 
         # Print irrep
         plt.text(x_right+x_irrep,eig+y,fancy_subscript(str(state["representation"]), True),fontsize=22)
@@ -461,7 +461,8 @@ def plot_levels(folder_path, plotname, eig_file= "EIGENVAL", pos_file="CONTCAR",
     #plt.legend(handles = handles, fontsize=15)
     plt.legend(handles = handles, bbox_to_anchor=(0.35, 0.80), fontsize=22)
     #plt.savefig(folder_path+"/Tr_"+plotname+".png")
-    plt.savefig(folder_path+"/Tr_"+plotname+".svg", format='svg')
+    #plt.savefig(folder_path+"/Tr_"+plotname+".svg", format='svg')
+    plt.savefig(folder_path+"/Tr_"+plotname+".pdf", format='pdf')
 
 
     return 0
@@ -469,10 +470,11 @@ def plot_levels(folder_path, plotname, eig_file= "EIGENVAL", pos_file="CONTCAR",
 if __name__ == "__main__":
 
     # Manual VB and CB for Diamond
-    #vb=9.048191
-    #cb=14.342933
-
-    plot_levels(sys.argv[1], sys.argv[2])
-    #plot_levels(sys.argv[1], sys.argv[2], vb=9.048191 , cb=14.342933)
+    VB=7.139410
+    CB=11.686146
+    
+    
+    #plot_levels(sys.argv[1], sys.argv[2])
+    plot_levels(sys.argv[1], sys.argv[2], vb=VB , cb=CB)
     #plot_levels_and_ipr(sys.argv[1], sys.argv[2])
     #plot_levels_and_ipr(sys.argv[1], sys.argv[2], vb=9.048191 , cb=14.342933)
